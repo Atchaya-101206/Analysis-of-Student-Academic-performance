@@ -1,0 +1,391 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analyzing Student Academic Performance</title>
+  <!-- CDN libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#6EE7B7;--muted:#9AA4B2;--glass:rgba(255,255,255,0.03)}
+    *{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{margin:0;background:linear-gradient(180deg,#071128 0%, #081827 100%);color:#e6eef6;}
+    header{padding:18px 28px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:18px}
+    header h1{font-size:18px;margin:0}
+    .container{max-width:1200px;margin:22px auto;padding:18px}
+    .grid{display:grid;grid-template-columns:350px 1fr;gap:18px}
+    .card{background:var(--card);border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,0.03)}
+    .muted{color:var(--muted);font-size:13px}
+    .upload{display:flex;flex-direction:column;gap:12px}
+    input[type=file]{background:var(--glass);padding:10px;border-radius:8px;color:inherit}
+    .sample{font-size:13px;color:var(--muted);padding:8px;background:rgba(255,255,255,0.02);border-radius:6px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:6px;border-bottom:1px dashed rgba(255,255,255,0.03);text-align:left}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:inherit;cursor:pointer}
+    button.primary{background:linear-gradient(90deg,#0ea5a3,#6EE7B7);color:#022;box-shadow:0 6px 20px rgba(0,0,0,0.35)}
+    .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+    .full{grid-column:1/-1}
+    .legend{display:flex;gap:10px;align-items:center}
+    .badge{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);font-weight:600}
+    footer{padding:14px 28px;color:var(--muted);font-size:13px;text-align:center}
+    @media(max-width:880px){.grid{grid-template-columns:1fr}.charts{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header>
+    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 24 24'><rect fill='%236EE7B7' rx='4' width='24' height='24'/><text x='50%' y='55%' font-size='12' text-anchor='middle' fill='%23061E1A' font-family='Arial' font-weight='700'>ED</text></svg>" alt="logo" style="width:36px;height:36px;border-radius:8px"/>
+    <div>
+      <h1>Analyzing Student Academic Performance</h1>
+      <div class="muted">Interactive dashboard — upload CSV, explore, and flag at‑risk students</div>
+    </div>
+  </header>  <main class="container">
+    <div class="grid">
+      <!-- Left column: controls -->
+      <aside class="card">
+        <h3>Data Input</h3>
+        <div class="upload">
+          <input id="csvFile" type="file" accept=".csv" />
+          <div class="muted">Expected CSV columns (case-sensitive): <strong>StudentID, Name, FinalGrade, AttendancePercent, LMSLogins, AssignmentDelayDays, ParentEducation, PartTimeHours</strong></div>
+          <div class="sample">Sample rows:<br/>S001,Anita,78,92,32,1,Bachelors,0</div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="loadSample">Load Sample Data</button>
+            <button id="clearData">Clear</button>
+          </div>
+        </div><hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+    <h3>Analysis</h3>
+    <div class="controls">
+      <button id="summaryBtn">Show Summary</button>
+      <button id="correlBtn">Show Correlations</button>
+      <button id="predictBtn" class="primary">Run Simple Predictor</button>
+    </div>
+
+    <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+    <h3>Flags</h3>
+    <div class="muted">Threshold to mark 'At‑Risk' student (final grade &lt;= threshold)</div>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <input id="riskThreshold" type="number" value="50" style="width:90px;padding:6px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit" />
+      <button id="applyThresh">Apply</button>
+    </div>
+
+    <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+    <div class="muted">Export results</div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button id="downloadCsv">Download Flags CSV</button>
+      <button id="downloadReport">Download Summary (TXT)</button>
+    </div>
+  </aside>
+
+  <!-- Right column: content -->
+  <section>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div class="badge">Dataset</div>
+          <div class="muted" id="rowCount">No data loaded</div>
+        </div>
+        <div class="legend"><span class="muted">Target:</span><strong style="margin-left:6px">FinalGrade</strong></div>
+      </div>
+
+      <div style="margin-top:12px;overflow:auto;max-height:280px">
+        <table id="dataTable"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="charts">
+      <div class="card">
+        <h4>Grade Distribution</h4>
+        <canvas id="gradeHist" height="200"></canvas>
+      </div>
+
+      <div class="card">
+        <h4>Attendance vs Final Grade (scatter)</h4>
+        <canvas id="scatter" height="200"></canvas>
+      </div>
+
+      <div class="card full">
+        <h4>Top Correlations with FinalGrade</h4>
+        <div id="corrTable" style="overflow:auto;max-height:200px"></div>
+      </div>
+
+      <div class="card">
+        <h4>Predictions / Flags</h4>
+        <div id="predictSummary" class="muted">Run the simple predictor to flag at‑risk students.</div>
+        <div style="margin-top:8px;overflow:auto;max-height:180px"><table id="flagTable"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+  </section>
+</div>
+
+  </main>  <footer>Tip: Save this file as <code>student‑analysis.html</code> and open it in your browser. Uses only client‑side code — your data stays in your browser.</footer><script>
+/* --------------------------------------------------------------------------------
+   Simple interactive web app to analyze student performance
+   Features:
+   - Load CSV using PapaParse or sample data
+   - Show data table
+   - Compute summary statistics
+   - Compute pairwise Pearson correlation with FinalGrade
+   - Simple linear regression predictor (FinalGrade from selected numeric feature set)
+   - Flag at‑risk students based on threshold
+   - Download flags as CSV and summary as text
+   -------------------------------------------------------------------------------- */
+
+let dataset = [];
+let numericCols = [];
+const sampleCsv = `StudentID,Name,FinalGrade,AttendancePercent,LMSLogins,AssignmentDelayDays,ParentEducation,PartTimeHours
+S001,Anita,78,92,32,1,Bachelors,0
+S002,Raj,46,62,5,6,HighSchool,20
+S003,Leela,85,96,45,0,Masters,0
+S004,Sunil,52,70,10,3,HighSchool,15
+S005,Maya,91,98,55,0,Bachelors,0
+S006,Tom,34,55,2,10,HighSchool,25
+S007,Arun,68,85,18,2,Bachelors,10
+S008,Kavya,74,88,20,1,Masters,5
+S009,Ravi,58,75,12,4,HighSchool,12
+S010,Nila,82,94,38,0,Masters,0`;
+
+// UTILITIES -------------------------------------------------
+function isNumeric(n){return !isNaN(parseFloat(n)) && isFinite(n);} 
+function toNumberSafe(v){const n=parseFloat(v);return isNaN(n)?null:n}
+
+function loadDataFromCsvText(text){
+  const res = Papa.parse(text.trim(), {header:true,skipEmptyLines:true});
+  dataset = res.data.map(row=>{
+    // trim keys
+    const out = {};
+    for(const k in row) out[k.trim()] = row[k].trim();
+    return out;
+  });
+  analyzeColumns();
+  renderTable();
+  renderSummaryCount();
+}
+
+function analyzeColumns(){
+  if(!dataset.length){numericCols=[];return}
+  const keys = Object.keys(dataset[0]);
+  numericCols = keys.filter(k=>dataset.every(r=>r[k]===""?true:isNumeric(r[k])));
+}
+
+function renderTable(){
+  const tbl = document.getElementById('dataTable');
+  const thead = tbl.querySelector('thead');
+  const tbody = tbl.querySelector('tbody');
+  thead.innerHTML='';tbody.innerHTML='';
+  if(!dataset.length){thead.innerHTML='<tr><th>No data</th></tr>';return}
+  const keys = Object.keys(dataset[0]);
+  const tr = document.createElement('tr');
+  keys.forEach(k=>{const th=document.createElement('th');th.textContent=k;tr.appendChild(th)});
+  thead.appendChild(tr);
+  dataset.forEach(r=>{
+    const tr=document.createElement('tr');
+    keys.forEach(k=>{const td=document.createElement('td');td.textContent=r[k]||'';tr.appendChild(td)});
+    tbody.appendChild(tr);
+  })
+}
+
+function renderSummaryCount(){
+  document.getElementById('rowCount').textContent = dataset.length ? ${dataset.length} rows loaded • ${numericCols.length} numeric columns detected : 'No data loaded';
+}
+
+// SUMMARY / STATS -------------------------------------------
+function getNumericMatrix(){
+  if(!dataset.length) return {cols:[],mat:[]};
+  const cols = numericCols.slice();
+  const mat = dataset.map(r => cols.map(c=>toNumberSafe(r[c])));
+  return {cols,mat};
+}
+
+function computeSummary(){
+  const {cols,mat} = getNumericMatrix();
+  if(!cols.length) return {};
+  const stats = {};
+  cols.forEach((c,i)=>{
+    const vals = mat.map(r=>r[i]).filter(v=>v!==null);
+    const n = vals.length; const mean = vals.reduce((a,b)=>a+b,0)/n;
+    const sorted = vals.slice().sort((a,b)=>a-b);
+    const median = sorted[Math.floor(n/2)];
+    const sd = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)*(b-mean),0)/n);
+    stats[c]={n,mean:round(mean),median:round(median),sd:round(sd),min:Math.min(...vals),max:Math.max(...vals)};
+  });
+  return stats;
+}
+
+function round(v,dec=2){return Math.round(v*Math.pow(10,dec))/Math.pow(10,dec)}
+
+// CORRELATIONS ----------------------------------------------
+function pearson(x,y){
+  if(x.length!==y.length) return null;
+  const n=x.length;const mx=x.reduce((a,b)=>a+b,0)/n;const my=y.reduce((a,b)=>a+b,0)/n;
+  let num=0,denx=0,deny=0;
+  for(let i=0;i<n;i++){num+=(x[i]-mx)(y[i]-my);denx+=(x[i]-mx)(x[i]-mx);deny+=(y[i]-my)*(y[i]-my)}
+  const den=Math.sqrt(denx*deny);
+  return den===0?0:round(num/den,4);
+}
+
+function computeCorrelations(){
+  const {cols,mat} = getNumericMatrix();
+  if(!cols.length) return [];
+  const idxTarget = cols.indexOf('FinalGrade');
+  if(idxTarget===-1) return [];
+  const target = mat.map(r=>r[idxTarget]).filter(v=>v!==null);
+  const results = [];
+  cols.forEach((c,ci)=>{
+    if(c==='FinalGrade') return;
+    const colVals = mat.map(r=>r[ci]);
+    // filter pairs where both not null
+    const pairs = [];
+    for(let i=0;i<colVals.length;i++){if(colVals[i]!==null && mat[i][idxTarget]!==null) pairs.push([colVals[i],mat[i][idxTarget]])}
+    if(!pairs.length) return;
+    const xs = pairs.map(p=>p[0]); const ys = pairs.map(p=>p[1]);
+    results.push({feature:c,corr:pearson(xs,ys)});
+  });
+  results.sort((a,b)=>Math.abs(b.corr)-Math.abs(a.corr));
+  return results;
+}
+
+// CHARTS ----------------------------------------------------
+let histChart, scatterChart;
+function renderCharts(){
+  const grades = dataset.map(r=>toNumberSafe(r['FinalGrade'])).filter(v=>v!==null);
+  const attendance = dataset.map(r=>toNumberSafe(r['AttendancePercent'])).filter(v=>v!==null);
+  // Hist
+  const ctx = document.getElementById('gradeHist').getContext('2d');
+  const bins = createBins(grades,8);
+  if(histChart) histChart.destroy();
+  histChart = new Chart(ctx,{type:'bar',data:{labels:bins.labels,datasets:[{label:'# students',data:bins.counts}]},options:{scales:{x:{title:{display:true,text:'Grade bins'}},y:{title:{display:true,text:'Count'}}}}});
+  // Scatter attendance vs grade
+  const ctx2 = document.getElementById('scatter').getContext('2d');
+  if(scatterChart) scatterChart.destroy();
+  const points = dataset.map(r=>({x:toNumberSafe(r['AttendancePercent']),y:toNumberSafe(r['FinalGrade']),label:r['Name']||r['StudentID']})).filter(p=>p.x!==null && p.y!==null);
+  scatterChart = new Chart(ctx2,{type:'scatter',data:{datasets:[{label:'Attendance vs Grade',data:points}]},options:{scales:{x:{title:{display:true,text:'Attendance %'},min:0,max:100},y:{title:{display:true,text:'Final Grade'},min:0,max:100}},plugins:{tooltip:{callbacks:{label(ctx){return ${ctx.raw.label}: (${ctx.raw.x}, ${ctx.raw.y})}}}}});
+}
+
+function createBins(arr, n){
+  if(!arr.length) return {labels:[],counts:[]};
+  const min=Math.min(...arr), max=Math.max(...arr);
+  const width=(max-min)/n; const counts=Array(n).fill(0); const labels=[];
+  for(const v of arr){let idx=Math.min(n-1,Math.floor((v-min)/width)); if(isNaN(idx)) idx=0; counts[idx]++}
+  for(let i=0;i<n;i++){const a=round(min+i*width);const b=round(min+(i+1)*width);labels.push(${a}-${b})}
+  return {labels,counts}
+}
+
+// PREDICTION (VERY SIMPLE) ---------------------------------
+function simplePredictor(){
+  // train linear regression using top numeric features (except FinalGrade)
+  const corrs = computeCorrelations();
+  if(!corrs.length){alert('No numeric features or FinalGrade missing.');return}
+  // take top 2 correlated numeric features
+  const top = corrs.slice(0,2).map(c=>c.feature);
+  const features = top.filter(f=>f); // e.g. ['AttendancePercent','LMSLogins']
+  // Build design matrix X and target y
+  const X=[]; const y=[]; const rowsIdx=[];
+  for(let i=0;i<dataset.length;i++){
+    const r = dataset[i];
+    const vals = features.map(f=>toNumberSafe(r[f]));
+    const t = toNumberSafe(r['FinalGrade']);
+    if(vals.every(v=>v!==null) && t!==null){X.push([1,...vals]); y.push(t); rowsIdx.push(i)}
+  }
+  if(!X.length){alert('Not enough complete rows to train predictor.');return}
+  // Solve beta = (X'X)^-1 X'y via normal equations (small dims)
+  const Xt = transpose(X); const XtX = multiply(Xt,X); const XtY = multiplyVec(Xt,y);
+  const beta = solveLinearSystem(XtX,XtY); // returns coefficients
+  if(!beta){alert('Could not compute regression (singular matrix).');return}
+  // predictions & flags
+  const preds = [];
+  for(let i=0;i<dataset.length;i++){
+    const r = dataset[i];
+    const vals = features.map(f=>toNumberSafe(r[f]));
+    if(vals.some(v=>v===null)){preds.push({idx:i,pred:null,actual:toNumberSafe(r['FinalGrade'])});continue}
+    const x = [1,...vals]; const pred = round(dot(x,beta)); preds.push({idx:i,pred,actual:toNumberSafe(r['FinalGrade'])});
+  }
+  // prepare table
+  const thr = parseFloat(document.getElementById('riskThreshold').value)||50;
+  renderFlags(preds,thr);
+  const summary = Model trained using features: ${features.join(', ')}. Threshold for at-risk: ${thr}.\nCoefficients: ${beta.map(b=>round(b,3)).join(', ')}.;
+  document.getElementById('predictSummary').textContent = summary;
+}
+
+function renderFlags(preds,threshold){
+  const thead = document.getElementById('flagTable').querySelector('thead');
+  const tbody = document.getElementById('flagTable').querySelector('tbody');
+  thead.innerHTML='';tbody.innerHTML='';
+  thead.innerHTML = '<tr><th>StudentID</th><th>Name</th><th>Predicted</th><th>Actual</th><th>Flag</th></tr>';
+  preds.forEach(p=>{
+    const r = dataset[p.idx];
+    const tr = document.createElement('tr');
+    tr.innerHTML = <td>${r.StudentID||''}</td><td>${r.Name||''}</td><td>${p.pred===null?'N/A':p.pred}</td><td>${p.actual===null?'N/A':p.actual}</td><td>${(p.pred!==null && p.pred<=threshold)?'<strong style="color:#ffb3b3">AT‑RISK</strong>':''}</td>;
+    tbody.appendChild(tr);
+  })
+}
+
+// DOWNLOAD --------------------------------------------------
+function downloadCsv(flags){
+  // create CSV with StudentID,Name,Predicted,Actual,Flag
+  const rows = [['StudentID','Name','Predicted','Actual','Flag']];
+  flags.forEach(p=>{const r=dataset[p.idx];rows.push([r.StudentID||'',r.Name||'',p.pred===null?'':p.pred,p.actual===null?'':p.actual,(p.pred!==null && p.pred<=parseFloat(document.getElementById('riskThreshold').value||50))?'AT-RISK':''])});
+  const csv = rows.map(r=>r.map(c=>"${(''+c).replace(/"/g,'""')}").join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download='student_flags.csv';a.click();URL.revokeObjectURL(url);
+}
+
+function downloadReportText(){
+  const stats = computeSummary();
+  const corrs = computeCorrelations();
+  let txt = 'Student Academic Performance — Summary\n\n';
+  txt += Rows: ${dataset.length}\n\nNumeric summaries:\n;
+  for(const k in stats) txt += ${k}: n=${stats[k].n}, mean=${stats[k].mean}, sd=${stats[k].sd}, min=${stats[k].min}, max=${stats[k].max}\n;
+  txt += '\nTop correlations with FinalGrade:\n';
+  corrs.slice(0,10).forEach(c=>txt += ${c.feature}: ${c.corr}\n);
+  const blob = new Blob([txt],{type:'text/plain'}); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download='analysis_summary.txt';a.click();URL.revokeObjectURL(url);
+}
+
+// LINEAR ALGEBRA HELPERS (small matrices) --------------------
+function transpose(A){return A[0].map((_,i)=>A.map(r=>r[i]));}
+function multiply(A,B){ // A: m x n, B: n x p
+  const m=A.length,n=A[0].length,p=B[0].length;const C=Array.from({length:m},()=>Array(p).fill(0));
+  for(let i=0;i<m;i++) for(let j=0;j<p;j++) for(let k=0;k<n;k++) C[i][j]+=A[i][k]*B[k][j];
+  return C;
+}
+function multiplyVec(A,v){ // A: m x n, v: n
+  const m=A.length,n=A[0].length; const out=Array(n).fill(0);
+  // we'll assume A is n x n here (XtX), so size consistency
+  if(A.length===A[0].length && v.length===A.length){const res=Array(A.length).fill(0); for(let i=0;i<A.length;i++) for(let j=0;j<A.length;j++) res[i]+=A[i][j]*v[j]; return res} 
+  // general fallback
+  return [];
+}
+function dot(a,b){let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s}
+
+// Solve linear system Ax=b using Gaussian elimination
+function solveLinearSystem(A,b){
+  const n=A.length; const M=Array.from({length:n},(_,i)=>A[i].slice()); const B=b.slice();
+  for(let k=0;k<n;k++){
+    // find pivot
+    let iMax=k; for(let i=k+1;i<n;i++) if(Math.abs(M[i][k])>Math.abs(M[iMax][k])) iMax=i;
+    if(Math.abs(M[iMax][k])<1e-12) return null; // singular
+    [M[k],M[iMax]]=[M[iMax],M[k]]; [B[k],B[iMax]]=[B[iMax],B[k]];
+    // normalize
+    const pivot=M[k][k]; for(let j=k;j<n;j++) M[k][j]/=pivot; B[k]/=pivot;
+    // eliminate
+    for(let i=0;i<n;i++) if(i!==k){const factor=M[i][k]; for(let j=k;j<n;j++) M[i][j]-=factor*M[k][j]; B[i]-=factor*B[k];}
+  }
+  return B;
+}
+
+// EVENT LISTENERS -------------------------------------------
+document.getElementById('csvFile').addEventListener('change',function(e){
+  const file = this.files[0]; if(!file) return;
+  const reader = new FileReader(); reader.onload = () => loadDataFromCsvText(reader.result); reader.readAsText(file);
+});
+
+document.getElementById('loadSample').addEventListener('click',()=>{loadDataFromCsvText(sampleCsv); renderCharts();});
+document.getElementById('clearData').addEventListener('click',()=>{dataset=[];numericCols=[];renderTable();renderSummaryCount();document.getElementById('predictSummary').textContent='Run the simple predictor to flag at‑risk students.'; if(histChart) histChart.destroy(); if(scatterChart) scatterChart.destroy();document.getElementById('corrTable').innerHTML='';document.getElementById('flagTable').querySelector('tbody').innerHTML='';});
+
+document.getElementById('summaryBtn').addEventListener('click',()=>{
+  const stats = computeSummary();
+  if(!Object.keys(stats).length){alert('No numeric data available.');return}
+  let html = '<table style="width:100%"><thead><tr><th>Feature</th><th>n</th><th>mean</th><th>median</th><th>sd</th><th>min</th><th>max</th></tr></thead><tbody>';
+  for(const k in stats) html += `<tr><td>${k}</td><td>${stats[k].n}</td><td>${stats[k].
